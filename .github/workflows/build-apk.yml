@@ -72,37 +72,16 @@ jobs:
         run: |
           npx cap init "PongApp" "com.example.pong" --web-dir=www
 
-      - name: Debug Capacitor setup
-        run: |
-          echo "Current directory contents:"
-          ls -la
-          echo "Capacitor config:"
-          cat capacitor.config.json || echo "No capacitor.config.json found"
-          echo "WWW directory contents:"
-          ls -la www/
-          echo "Capacitor CLI version:"
-          npx cap --version
-
       - name: Add Android platform
         run: |
           echo "Adding Android platform..."
           npx cap add android
           echo "✅ Android platform added successfully"
 
-      - name: Verify Android platform
-        run: |
-          if [ -d "android" ]; then
-            echo "✅ Android directory exists"
-            ls -la android/
-          else
-            echo "❌ Android directory not found"
-            exit 1
-          fi
-
       - name: Sync Capacitor to Android
         run: npx cap sync android
 
-      - name: Generate Android app icons (with fallback)
+      - name: Generate Android app icons (fixed)
         run: |
           sudo apt-get update
           sudo apt-get install -y imagemagick
@@ -122,20 +101,39 @@ jobs:
           if [ ! -f "$ICON_SRC" ]; then
             echo "❌ No icon available to resize—skipping icon generation."
           else
-            for size in 48 72 96 144 192 512; do
+            # Remove existing adaptive icon XML files that conflict with PNG generation
+            find android/app/src/main/res -name "ic_launcher.xml" -delete 2>/dev/null || true
+            find android/app/src/main/res -name "ic_launcher_background.xml" -delete 2>/dev/null || true
+            find android/app/src/main/res -name "ic_launcher_foreground.xml" -delete 2>/dev/null || true
+            
+            # Generate PNG icons for all densities (excluding anydpi-v26 to avoid conflicts)
+            for size in 48 72 96 144 192; do
               case $size in
                 48)  dir=mipmap-mdpi ;;
                 72)  dir=mipmap-hdpi ;;
                 96)  dir=mipmap-xhdpi ;;
                 144) dir=mipmap-xxhdpi ;;
                 192) dir=mipmap-xxxhdpi ;;
-                512) dir=mipmap-anydpi-v26 ;;
               esac
               mkdir -p android/app/src/main/res/$dir
               convert "$ICON_SRC" -resize ${size}x${size} \
                 android/app/src/main/res/$dir/ic_launcher.png \
                 || echo "⚠️ Failed to generate ${size}×${size} icon; skipping."
             done
+            
+            # Generate a simple adaptive icon XML for anydpi-v26 that uses the xxxhdpi PNG
+            mkdir -p android/app/src/main/res/mipmap-anydpi-v26
+            cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@android:color/white"/>
+              <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+          </adaptive-icon>
+          EOF
+            
+            # Copy the 192px version as foreground for adaptive icon
+            cp android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png \
+               android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png
           fi
 
       - name: Setup Java 21
