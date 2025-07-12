@@ -145,8 +145,8 @@ jobs:
       - name: Install Android SDK Tools
         uses: android-actions/setup-android@v3
         with:
-          api-levels: 33
-          build-tools: '33.0.2'
+          api-levels: 35
+          build-tools: '35.0.0'
 
       - name: Grant execution permissions
         run: chmod +x android/gradlew
