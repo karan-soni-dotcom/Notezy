@@ -23,9 +23,9 @@ jobs:
             echo '{"name": "pong-app", "version": "1.0.0", "description": "Pong Game App"}' > package.json
           fi
 
-      - name: Install Capacitor dependencies
+      - name: Install STABLE Capacitor dependencies
         run: |
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npm install @capacitor/core@5.7.8 @capacitor/cli@5.7.8 @capacitor/android@5.7.8
 
       - name: Prepare www folder
         run: |
@@ -81,72 +81,56 @@ jobs:
       - name: Sync Capacitor to Android
         run: npx cap sync android
 
-      - name: Generate Android app icons (fixed)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y imagemagick
-
-          ICON_SRC=$(find . -maxdepth 2 -type f -name 'app.png' | head -n1 || true)
-
-          if [ -f "$ICON_SRC" ]; then
-            echo "Using icon: $ICON_SRC"
-          else
-            echo "⚠️ app.png not found; creating default placeholder icon."
-            mkdir -p temp_icons
-            # Create a simple colored square as placeholder
-            convert -size 512x512 xc:blue temp_icons/icon.png
-            ICON_SRC="temp_icons/icon.png"
-          fi
-
-          if [ ! -f "$ICON_SRC" ]; then
-            echo "❌ No icon available to resize—skipping icon generation."
-          else
-            # Remove existing adaptive icon XML files that conflict with PNG generation
-            find android/app/src/main/res -name "ic_launcher.xml" -delete 2>/dev/null || true
-            find android/app/src/main/res -name "ic_launcher_background.xml" -delete 2>/dev/null || true
-            find android/app/src/main/res -name "ic_launcher_foreground.xml" -delete 2>/dev/null || true
-            
-            # Generate PNG icons for all densities (excluding anydpi-v26 to avoid conflicts)
-            for size in 48 72 96 144 192; do
-              case $size in
-                48)  dir=mipmap-mdpi ;;
-                72)  dir=mipmap-hdpi ;;
-                96)  dir=mipmap-xhdpi ;;
-                144) dir=mipmap-xxhdpi ;;
-                192) dir=mipmap-xxxhdpi ;;
-              esac
-              mkdir -p android/app/src/main/res/$dir
-              convert "$ICON_SRC" -resize ${size}x${size} \
-                android/app/src/main/res/$dir/ic_launcher.png \
-                || echo "⚠️ Failed to generate ${size}×${size} icon; skipping."
-            done
-            
-            # Generate a simple adaptive icon XML for anydpi-v26 that uses the xxxhdpi PNG
-            mkdir -p android/app/src/main/res/mipmap-anydpi-v26
-            cat > android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@android:color/white"/>
-              <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
-          </adaptive-icon>
-          EOF
-            
-            # Copy the 192px version as foreground for adaptive icon
-            cp android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png \
-               android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_foreground.png
-          fi
-
-      - name: Setup Java 21
+      - name: Setup Java 17 (Stable)
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: '21'
+          distribution: 'temurin'
+          java-version: '17'
 
-      - name: Install Android SDK Tools
-        uses: android-actions/setup-android@v3
-        with:
-          api-levels: 35
-          build-tools: '35.0.0'
+      - name: Setup Android SDK (Reliable method)
+        run: |
+          # Download and setup Android SDK manually for better control
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          unzip -q commandlinetools-linux-9477386_latest.zip
+          mkdir -p android-sdk/cmdline-tools
+          mv cmdline-tools android-sdk/cmdline-tools/latest
+          
+          export ANDROID_HOME=$PWD/android-sdk
+          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+          
+          # Accept licenses and install required components
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+          
+          # Set environment variables for the job
+          echo "ANDROID_HOME=$PWD/android-sdk" >> $GITHUB_ENV
+          echo "$PWD/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "$PWD/android-sdk/platform-tools" >> $GITHUB_PATH
+
+      - name: Skip custom icons (use defaults)
+        run: |
+          echo "ℹ️ Using default Capacitor icons to avoid any conflicts"
+          echo "✅ This eliminates all icon-related build errors"
+
+      - name: Force stable Android versions
+        run: |
+          echo "🔧 Ensuring stable Android SDK versions..."
+          
+          # Force compileSdkVersion and targetSdkVersion to 33 in build.gradle
+          sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 33/' android/app/build.gradle
+          sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 33/' android/app/build.gradle
+          sed -i 's/compileSdk [0-9]*/compileSdk 33/' android/app/build.gradle
+          sed -i 's/targetSdk [0-9]*/targetSdk 33/' android/app/build.gradle
+          
+          # Update variables.gradle if it exists
+          if [ -f "android/variables.gradle" ]; then
+            sed -i 's/compileSdkVersion = [0-9]*/compileSdkVersion = 33/' android/variables.gradle
+            sed -i 's/targetSdkVersion = [0-9]*/targetSdkVersion = 33/' android/variables.gradle
+          fi
+          
+          # Show what we set
+          echo "📋 Current Android versions in build.gradle:"
+          grep -E "(compileSdk|targetSdk)" android/app/build.gradle || true
 
       - name: Grant execution permissions
         run: chmod +x android/gradlew
@@ -154,7 +138,8 @@ jobs:
       - name: Build Release APK
         run: |
           cd android
-          ./gradlew clean assembleRelease
+          export ANDROID_HOME=$GITHUB_WORKSPACE/android-sdk
+          ./gradlew clean assembleRelease --stacktrace
 
       - name: List generated APK files
         run: |
