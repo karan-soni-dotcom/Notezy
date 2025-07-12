@@ -18,21 +18,25 @@ jobs:
           rm -rf www
           mkdir www
 
-          # Web assets fallback
-          files=( *.html *.js *.css )
-          if [ ${#files[@]} -gt 0 ]; then
-            echo "Copying web assets to www/: ${files[*]}"
-            cp "${files[@]}" www/ 2>/dev/null
+          # Find all top-level html/js/css
+          mapfile -t web_files < <(
+            find . -maxdepth 1 -type f \( -name '*.html' -o -name '*.js' -o -name '*.css' \)
+          )
+
+          if [ ${#web_files[@]} -gt 0 ]; then
+            echo "Copying web assets to www/":
+            printf "  - %s\n" "${web_files[@]}"
+            cp -- "${web_files[@]}" www/
           else
-            echo "⚠️ No HTML/CSS/JS files found—please verify your repo contains your web assets."
+            echo "⚠️  No .html/.js/.css found at repo root → www/ will be empty"
           fi
 
-          # Optional assets subfolder
+          # Copy assets folder if it exists
           if [ -d assets ]; then
             echo "Copying assets/ → www/assets/"
             cp -r assets www/
           else
-            echo "🔹 No assets/ directory found, skipping."
+            echo "ℹ️  No assets/ directory found, skipping."
           fi
 
       - name: Initialize Capacitor project
@@ -51,7 +55,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y imagemagick
 
-          # Find your source icon (app.png)
           ICON_SRC=$(find . -maxdepth 2 -type f -name 'app.png' | head -n1 || true)
 
           if [ -f "$ICON_SRC" ]; then
@@ -61,7 +64,6 @@ jobs:
             ICON_SRC="default/icon.png"
           fi
 
-          # Ensure we have something to resize
           if [ ! -f "$ICON_SRC" ]; then
             echo "❌ No icon available to resize—skipping icon generation."
             exit 0
@@ -78,8 +80,8 @@ jobs:
             esac
             mkdir -p android/app/src/main/res/$dir
             convert "$ICON_SRC" -resize ${size}x${size} \
-                    android/app/src/main/res/$dir/ic_launcher.png \
-              || echo "⚠️ Failed to generate $size×$size icon; skipping."
+              android/app/src/main/res/$dir/ic_launcher.png \
+              || echo "⚠️ Failed to generate ${size}×${size} icon; skipping."
           done
 
       - name: Setup Java 21
