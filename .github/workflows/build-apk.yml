@@ -12,6 +12,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Install Capacitor CLI globally so npx cap works without a package.json
+      - name: Install Capacitor CLI
+        run: npm install -g @capacitor/cli
+
       - name: Prepare www folder
         run: |
           echo "Cleaning and preparing www/…"
